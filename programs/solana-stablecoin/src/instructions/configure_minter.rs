@@ -23,6 +23,7 @@ pub fn configure_minter(ctx: Context<ConfigureMinter>, allowance: u64) -> Result
 }
 
 #[derive(Accounts)]
+// #[instruction(udpated_allowance: u64)]
 pub struct ConfigureMinter<'info> {
     #[account(
         mut,

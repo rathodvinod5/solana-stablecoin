@@ -16,6 +16,7 @@ pub fn update_minter_config(ctx: Context<UpdateMinterConfig>, udpated_allowance:
 
 
 #[derive(Accounts)]
+// #[instruction(udpated_allowance: u64)]
 pub struct UpdateMinterConfig<'info> {
     #[account(
         mut,
