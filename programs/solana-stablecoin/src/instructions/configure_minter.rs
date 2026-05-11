@@ -12,7 +12,7 @@ pub fn configure_minter(ctx: Context<ConfigureMinter>, allowance: u64) -> Result
     minter_config.set_inner(MinterConfig { 
         minter: minter.key(), 
         allowance, 
-        amount_minted: 0, 
+        total_minted: 0, 
         is_initialized: true, 
         bump: ctx.bumps.minter_config
     });

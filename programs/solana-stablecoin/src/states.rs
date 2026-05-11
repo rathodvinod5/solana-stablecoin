@@ -7,7 +7,7 @@ pub struct Config {
     pub mint: Pubkey,
     pub is_paused: bool,
     pub config_bump: u8,
-    pub mint_bump: u8
+    pub mint_bump: u8,
 }
 
 #[account]
@@ -15,7 +15,7 @@ pub struct Config {
 pub struct MinterConfig {
     pub minter: Pubkey,
     pub allowance: u64,
-    pub amount_minted: u64,
+    pub total_minted: u64,
     pub is_initialized: bool,
-    pub bump: u8,
+    pub bump: u8
 }

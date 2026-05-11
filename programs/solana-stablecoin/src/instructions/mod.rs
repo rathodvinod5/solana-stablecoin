@@ -6,3 +6,6 @@ pub mod configure_minter;
 
 pub use update_minter_config::*;
 pub mod update_minter_config;
+
+pub use remove_minter::*;
+pub mod remove_minter;
