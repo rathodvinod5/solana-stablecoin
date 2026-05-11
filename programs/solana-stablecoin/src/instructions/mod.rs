@@ -10,5 +10,8 @@ pub mod update_minter_config;
 pub use remove_minter::*;
 pub mod remove_minter;
 
-pub use pause::*;
-pub mod pause;
+pub use pause_mint::*;
+pub mod pause_mint;
+
+pub use unpause_mint::*;
+pub mod unpause_mint;

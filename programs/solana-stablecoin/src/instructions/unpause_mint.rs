@@ -5,16 +5,16 @@ use crate::{
     states::Config,
 };
 
-pub fn pause(ctx: Context<Pause>) -> Result<()> {
+pub fn unpause_mint(ctx: Context<UnPauseMint>) -> Result<()> {
     let config = &mut ctx.accounts.config;
-    config.is_paused = true;
+    config.is_paused = false;
     msg!("Stablecoin paused");
     
     Ok(())
 }
 
 #[derive(Accounts)]
-pub struct Pause<'info> {
+pub struct UnPauseMint<'info> {
     #[account(
         mut,
         constraint = config.admin == admin.key() @ StableCoinError::Unauthorised
