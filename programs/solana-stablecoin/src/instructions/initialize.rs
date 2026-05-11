@@ -18,6 +18,15 @@ pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
     config.config_bump = ctx.bumps.config;
     config.mint_bump = ctx.bumps.mint;
 
+    // alternate way
+    // config.set_inner(Config { 
+    //     admin: ctx.accounts.admin.key(), 
+    //     mint: ctx.accounts.mint.key(), 
+    //     is_paused: false, 
+    //     config_bum: ctx.bumps.config, 
+    //     mint_bump: ctx.bumps.mint 
+    // });
+
     Ok(())
 }
 
