@@ -8,7 +8,7 @@ use crate::{
 pub fn unpause_mint(ctx: Context<UnPauseMint>) -> Result<()> {
     let config = &mut ctx.accounts.config;
     config.is_paused = false;
-    msg!("Stablecoin paused");
+    msg!("Stablecoin unpaused");
     
     Ok(())
 }
