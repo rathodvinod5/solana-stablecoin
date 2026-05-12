@@ -9,5 +9,11 @@ pub enum StableCoinError {
     #[msg("Unauthorised")]
     Unauthorised,
     #[msg("Minter not initialized")]
-    UninitilizedMinter
+    UninitilizedMinter,
+    #[msg("Minting paused")]
+    MintingPaused,
+    #[msg("Allowance exceeded")]
+    AllowanceExceeded,
+    #[msg("Math overflow")]
+    MathOverflow
 }

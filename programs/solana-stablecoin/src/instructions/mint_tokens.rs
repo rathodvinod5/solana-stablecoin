@@ -1,9 +1,13 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken, 
-    // token::Mint, 
-    token_2022::{ Token2022 }, 
-    token_interface::{Mint, TokenAccount}
+    // token::MintTo, 
+    token_2022::{
+        Token2022, mint_to, MintTo
+    }, 
+    token_interface::{
+        Mint, TokenAccount
+    }
 };
 
 use crate::{
@@ -11,6 +15,40 @@ use crate::{
     states::{ Config, MinterConfig }
 };
 
+
+pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
+    let config = &mut ctx.accounts.config;
+    let minter_config = &mut ctx.accounts.minter_config;
+
+    require!(config.is_paused, StableCoinError::MintingPaused);
+
+    let amount_remaining = minter_config.allowance.checked_sub(minter_config.total_minted)
+        .ok_or(StableCoinError::AllowanceExceeded)?;
+
+    require!(amount <= amount_remaining, StableCoinError::InsufficientBalance);
+
+    minter_config.total_minted = minter_config.total_minted.checked_add(amount)
+        .ok_or(StableCoinError::MathOverflow)?;
+
+    let cpi_accounts = MintTo {
+        mint: ctx.accounts.mint.to_account_info(),
+        to: ctx.accounts.user_ata.to_account_info(),
+        authority: config.to_account_info(),
+    };
+    let signer_seeds: &[&[&[u8]]] = &[&[b"config", &[config.config_bump]]];
+
+    let cpi_context = CpiContext::new_with_signer(
+        ctx.accounts.token_program.to_account_info(),
+        cpi_accounts, 
+        signer_seeds
+    );
+
+    let _ = mint_to(cpi_context, amount)?;
+
+    msg!("Token minted to user: {:?}", &ctx.accounts.user);
+
+    Ok(())
+}
 
 
 #[derive(Accounts)]
