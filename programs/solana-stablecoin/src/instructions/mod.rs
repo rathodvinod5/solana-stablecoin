@@ -18,3 +18,6 @@ pub mod unpause_mint;
 
 pub use mint_tokens::*;
 pub mod mint_tokens;
+
+pub use burn_tokens::*;
+pub mod burn_tokens;
