@@ -18,12 +18,6 @@ describe("solana-stablecoin", () => {
   const minter = anchor.web3.Keypair.generate();
   const user = anchor.web3.Keypair.generate();
 
-  // const admin   = Keypair.generate();
-  // const minter  = Keypair.generate();
-  // const minter2 = Keypair.generate();
-  // const user    = Keypair.generate();
-  // const rogue   = Keypair.generate();
-
   // Derived PDAs (populated after initialize)
   let configPda: PublicKey;
   let mintPda: PublicKey;
