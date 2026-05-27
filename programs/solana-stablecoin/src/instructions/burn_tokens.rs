@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
-    associated_token::AssociatedToken,  token_2022::{burn, Burn, Token2022}, token_interface::{
+    token_2022::{burn, Burn, Token2022}, token_interface::{
         Mint, TokenAccount
     }
 };
