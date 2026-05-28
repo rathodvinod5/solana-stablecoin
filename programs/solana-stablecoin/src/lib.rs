@@ -6,7 +6,7 @@ use instructions::*;
 pub mod states;
 pub mod errors;
 
-declare_id!("45iBU1QvfiQ9HakZfGMx2T4s6RZtcRawycdX66xTRxcX");
+declare_id!("138UJ48r75UFpHw5Gb73ma6k8sUqJiRMFsraQqw6jyid");
 
 #[program]
 pub mod solana_stablecoin {
