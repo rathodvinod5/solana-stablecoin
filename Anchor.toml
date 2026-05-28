@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-solana_stablecoin = "45iBU1QvfiQ9HakZfGMx2T4s6RZtcRawycdX66xTRxcX"
+solana_stablecoin = "138UJ48r75UFpHw5Gb73ma6k8sUqJiRMFsraQqw6jyid"
 
 [registry]
 url = "https://api.apr.dev"
