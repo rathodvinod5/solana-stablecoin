@@ -244,7 +244,7 @@ describe("solana-stablecoin", () => {
   describe("UPDATE MINTER CONFIG", async () => {
     const updatedAllowance = new anchor.BN(2_000_000);
 
-    describe("happy cases", () => {
+    describe("Happy cases", () => {
       it("admin can update minter allowance", async () => {
         const [minterConfigPda] = deriveMinterConfig(
           minter.publicKey,
@@ -267,6 +267,31 @@ describe("solana-stablecoin", () => {
           mc.allowance.eq(updatedAllowance),
           "allowance should be updated",
         );
+      });
+    });
+
+    describe("Failure cases", () => {
+      it("non-admin cannot update minter config (Unauthorised)", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+
+        try {
+          await program.methods
+            .updateMinterConfig(new anchor.BN(9_999_999))
+            .accounts({
+              admin: rogue.publicKey,
+              config: configPda,
+              minterConfig: minterConfigPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown Unauthorised");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for unauthorized update");
+        }
       });
     });
   });
