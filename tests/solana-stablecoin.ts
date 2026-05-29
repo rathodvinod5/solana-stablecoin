@@ -293,6 +293,30 @@ describe("solana-stablecoin", () => {
           assert.ok(err, "Expected error for unauthorized update");
         }
       });
+
+      it("cannot update an uninitialized minter config (UninitilizedMinter)", async () => {
+        const fakeMinter = anchor.web3.Keypair.generate();
+        const [fakeMinterConfigPda] = deriveMinterConfig(
+          fakeMinter.publicKey,
+          programId,
+        );
+
+        try {
+          await program.methods
+            .updateMinterConfig(new anchor.BN(100))
+            .accounts({
+              admin: admin.publicKey,
+              config: configPda,
+              minterConfig: fakeMinterConfigPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([admin])
+            .rpc();
+          assert.fail("Should have thrown for uninitialized minter");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for uninitialized minter config");
+        }
+      });
     });
   });
 });
