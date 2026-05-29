@@ -23,6 +23,7 @@ describe("solana-stablecoin", () => {
   const minter = anchor.web3.Keypair.generate();
   const minter2 = anchor.web3.Keypair.generate();
   const user = anchor.web3.Keypair.generate();
+  const rogue = anchor.web3.Keypair.generate();
 
   // Derived PDAs (populated after initialize)
   let configPda: PublicKey;
@@ -193,6 +194,49 @@ describe("solana-stablecoin", () => {
           mc.allowance.eq(allowance2),
           "allowance should match for second minter",
         );
+      });
+    });
+
+    describe("failure cases", () => {
+      before(async () => {
+        try {
+          await airdrop(
+            provider.connection,
+            rogue.publicKey,
+            10 * LAMPORTS_PER_SOL,
+          );
+        } catch (err) {
+          console.log("Error while airdrop: ", err);
+        }
+      });
+
+      it("non-admin cannot configure a minter (Unauthorised)", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          rogue.publicKey,
+          programId,
+        );
+
+        try {
+          await program.methods
+            .configureMinter(allowance)
+            .accounts({
+              admin: rogue.publicKey, // rogue acting as admin
+              minter: rogue.publicKey,
+              config: configPda,
+              minterConfig: minterConfigPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown Unauthorised");
+        } catch (err: any) {
+          const anchorErr = err as anchor.AnchorError;
+          const msg = anchorErr.error?.errorMessage ?? err.message;
+          assert.ok(
+            msg.includes("Unauthorised"),
+            `Expected Unauthorised error, got: ${msg}`,
+          );
+        }
       });
     });
   });
