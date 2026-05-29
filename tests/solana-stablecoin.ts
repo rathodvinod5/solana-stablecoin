@@ -21,6 +21,7 @@ describe("solana-stablecoin", () => {
   const programId = program.programId;
   const admin = anchor.web3.Keypair.generate();
   const minter = anchor.web3.Keypair.generate();
+  const minter2 = anchor.web3.Keypair.generate();
   const user = anchor.web3.Keypair.generate();
 
   // Derived PDAs (populated after initialize)
@@ -56,35 +57,63 @@ describe("solana-stablecoin", () => {
     });
 
     describe("VALIDATE SOL AMOUNT", async () => {
-      it("admin has SOL balance", async () => {
+      it("A. 1. Admin has SOL balance", async () => {
         const bal = await provider.connection.getBalance(admin.publicKey);
-        // assert.isAtLeast(
-        //   bal,
-        //   LAMPORTS_PER_SOL,
-        //   "admin should have at least 1 SOL",
-        // );
         assert.ok(bal >= LAMPORTS_PER_SOL, "admin should have at least 1 SOL");
       });
 
-      it("minter has SOL balance", async () => {
+      it("A. 2. Minter has SOL balance", async () => {
         const bal = await provider.connection.getBalance(minter.publicKey);
-        // assert.isAtLeast(
-        //   bal,
-        //   LAMPORTS_PER_SOL,
-        //   "minter should have at least 1 SOL",
-        // );
         assert.ok(bal >= LAMPORTS_PER_SOL, "minter should have at least 1 SOL");
       });
     });
+  });
 
-    describe("INIT MINT and CONFIG AMOUNT", async () => {
-      before(() => {
-        [configPda] = deriveConfig(programId);
-        [mintPda] = deriveMint(programId);
+  describe("INIT MINT and CONFIG AMOUNT", async () => {
+    before(() => {
+      [configPda] = deriveConfig(programId);
+      [mintPda] = deriveMint(programId);
+    });
+
+    describe("Happy cases", () => {
+      it("B. 1. initializes the config and mint accounts successfully", async () => {
+        await program.methods
+          .initialize()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            mint: mintPda,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const config = await program.account.config.fetch(configPda);
+        assert.ok(
+          config.admin.equals(admin.publicKey),
+          "admin key should match",
+        );
+        assert.ok(config.mint.equals(mintPda), "mint key should match");
+        assert.strictEqual(
+          config.isPaused,
+          false,
+          "should not be paused on init",
+        );
       });
 
-      describe("Happy cases", () => {
-        it("initializes the config and mint accounts successfully", async () => {
+      it("B. 2. config PDA stores correct bumps", async () => {
+        const config = await program.account.config.fetch(configPda);
+        const [, expectedConfigBump] = deriveConfig(programId);
+        const [, expectedMintBump] = deriveMint(programId);
+        assert.strictEqual(config.configBump, expectedConfigBump);
+        assert.strictEqual(config.mintBump, expectedMintBump);
+      });
+    });
+
+    describe("Failure cases", () => {
+      it("C. 1. cannot initialize twice (config PDA already exists)", async () => {
+        try {
           await program.methods
             .initialize()
             .accounts({
@@ -96,56 +125,76 @@ describe("solana-stablecoin", () => {
             })
             .signers([admin])
             .rpc();
-
-          const config = await program.account.config.fetch(configPda);
-          assert.ok(
-            config.admin.equals(admin.publicKey),
-            "admin key should match",
-          );
-          assert.ok(config.mint.equals(mintPda), "mint key should match");
-          assert.strictEqual(
-            config.isPaused,
-            false,
-            "should not be paused on init",
-          );
-        });
-
-        it("config PDA stores correct bumps", async () => {
-          const config = await program.account.config.fetch(configPda);
-          const [, expectedConfigBump] = deriveConfig(programId);
-          const [, expectedMintBump] = deriveMint(programId);
-          assert.strictEqual(config.configBump, expectedConfigBump);
-          assert.strictEqual(config.mintBump, expectedMintBump);
-        });
-      });
-
-      describe("Failure cases", () => {
-        it("cannot initialize twice (config PDA already exists)", async () => {
-          try {
-            await program.methods
-              .initialize()
-              .accounts({
-                admin: admin.publicKey,
-                config: configPda,
-                mint: mintPda,
-                tokenProgram: TOKEN_2022_PROGRAM_ID,
-                systemProgram: anchor.web3.SystemProgram.programId,
-              })
-              .signers([admin])
-              .rpc();
-            assert.fail("Should have thrown on double-init");
-          } catch (err) {
-            assert.ok(err, "Expected an error on double initialization");
-          }
-        });
+          assert.fail("Should have thrown on double-init");
+        } catch (err) {
+          assert.ok(err, "Expected an error on double initialization");
+        }
       });
     });
   });
 
-  describe("SOME TEST CASES", async () => {
-    describe("happy cases", async () => {});
+  describe("CONFIGURE MINTER", () => {
+    const allowance = new anchor.BN(1_000_000); // 1 token (6 decimals)
 
-    describe("failure cases", async () => {});
+    describe("Happy cases", () => {
+      it("D. 1. admin can configure a minter with an allowance", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+
+        await program.methods
+          .configureMinter(allowance)
+          .accounts({
+            admin: admin.publicKey,
+            minter: minter.publicKey,
+            config: configPda,
+            minterConfig: minterConfigPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const mc = await program.account.minterConfig.fetch(minterConfigPda);
+        assert.ok(
+          mc.minter.equals(minter.publicKey),
+          "minter key should match",
+        );
+        assert.ok(mc.allowance.eq(allowance), "allowance should match");
+        assert.ok(mc.totalMinted.eqn(0), "total_minted should start at 0");
+        assert.strictEqual(
+          mc.isInitialized,
+          true,
+          "should be marked initialized",
+        );
+      });
+
+      it("C. 2. admin can configure a second minter independently", async () => {
+        const [minter2ConfigPda] = deriveMinterConfig(
+          minter2.publicKey,
+          programId,
+        );
+        const allowance2 = new anchor.BN(500_000);
+
+        await program.methods
+          .configureMinter(allowance2)
+          .accounts({
+            admin: admin.publicKey,
+            minter: minter2.publicKey,
+            config: configPda,
+            minterConfig: minter2ConfigPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const mc = await program.account.minterConfig.fetch(minter2ConfigPda);
+        assert.ok(
+          mc.allowance.eq(allowance2),
+          "allowance should match for second minter",
+        );
+      });
+    });
   });
 });
 
