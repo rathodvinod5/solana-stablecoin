@@ -22,4 +22,9 @@ use super::*;
         let _ = instructions::configure_minter(ctx, allowance)?;
         Ok(())
     }
+
+    pub fn update_minter_config(ctx: Context<UpdateMinterConfig>, updated_allowance: u64) -> Result<()> {
+        let _ = instructions::update_minter_config(ctx, updated_allowance)?;
+        Ok(())
+    }
 }

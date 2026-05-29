@@ -240,6 +240,36 @@ describe("solana-stablecoin", () => {
       });
     });
   });
+
+  describe("UPDATE MINTER CONFIG", async () => {
+    const updatedAllowance = new anchor.BN(2_000_000);
+
+    describe("happy cases", () => {
+      it("admin can update minter allowance", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+
+        await program.methods
+          .updateMinterConfig(updatedAllowance)
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            minterConfig: minterConfigPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const mc = await program.account.minterConfig.fetch(minterConfigPda);
+        assert.ok(
+          mc.allowance.eq(updatedAllowance),
+          "allowance should be updated",
+        );
+      });
+    });
+  });
 });
 
 async function airdrop(
