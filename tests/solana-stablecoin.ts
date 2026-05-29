@@ -83,7 +83,7 @@ describe("solana-stablecoin", () => {
         [mintPda] = deriveMint(programId);
       });
 
-      describe("happy cases", () => {
+      describe("Happy cases", () => {
         it("initializes the config and mint accounts successfully", async () => {
           await program.methods
             .initialize()
@@ -116,6 +116,27 @@ describe("solana-stablecoin", () => {
           const [, expectedMintBump] = deriveMint(programId);
           assert.strictEqual(config.configBump, expectedConfigBump);
           assert.strictEqual(config.mintBump, expectedMintBump);
+        });
+      });
+
+      describe("Failure cases", () => {
+        it("cannot initialize twice (config PDA already exists)", async () => {
+          try {
+            await program.methods
+              .initialize()
+              .accounts({
+                admin: admin.publicKey,
+                config: configPda,
+                mint: mintPda,
+                tokenProgram: TOKEN_2022_PROGRAM_ID,
+                systemProgram: anchor.web3.SystemProgram.programId,
+              })
+              .signers([admin])
+              .rpc();
+            assert.fail("Should have thrown on double-init");
+          } catch (err) {
+            assert.ok(err, "Expected an error on double initialization");
+          }
         });
       });
     });
