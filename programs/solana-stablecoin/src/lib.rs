@@ -17,4 +17,9 @@ use super::*;
         let _ = instructions::initialize(ctx)?;
         Ok(())
     }
+
+    pub fn configure_minter(ctx: Context<ConfigureMinter>, allowance: u64) -> Result<()> {
+        let _ = instructions::configure_minter(ctx, allowance)?;
+        Ok(())
+    }
 }
