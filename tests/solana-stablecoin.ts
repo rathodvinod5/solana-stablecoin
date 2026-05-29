@@ -240,6 +240,85 @@ describe("solana-stablecoin", () => {
       });
     });
   });
+
+  describe("UPDATE MINTER CONFIG", async () => {
+    const updatedAllowance = new anchor.BN(2_000_000);
+
+    describe("Happy cases", () => {
+      it("admin can update minter allowance", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+
+        await program.methods
+          .updateMinterConfig(updatedAllowance)
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            minterConfig: minterConfigPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const mc = await program.account.minterConfig.fetch(minterConfigPda);
+        assert.ok(
+          mc.allowance.eq(updatedAllowance),
+          "allowance should be updated",
+        );
+      });
+    });
+
+    describe("Failure cases", () => {
+      it("non-admin cannot update minter config (Unauthorised)", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+
+        try {
+          await program.methods
+            .updateMinterConfig(new anchor.BN(9_999_999))
+            .accounts({
+              admin: rogue.publicKey,
+              config: configPda,
+              minterConfig: minterConfigPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown Unauthorised");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for unauthorized update");
+        }
+      });
+
+      it("cannot update an uninitialized minter config (UninitilizedMinter)", async () => {
+        const fakeMinter = anchor.web3.Keypair.generate();
+        const [fakeMinterConfigPda] = deriveMinterConfig(
+          fakeMinter.publicKey,
+          programId,
+        );
+
+        try {
+          await program.methods
+            .updateMinterConfig(new anchor.BN(100))
+            .accounts({
+              admin: admin.publicKey,
+              config: configPda,
+              minterConfig: fakeMinterConfigPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([admin])
+            .rpc();
+          assert.fail("Should have thrown for uninitialized minter");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for uninitialized minter config");
+        }
+      });
+    });
+  });
 });
 
 async function airdrop(
