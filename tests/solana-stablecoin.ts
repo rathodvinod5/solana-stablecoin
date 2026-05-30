@@ -28,6 +28,7 @@ describe("solana-stablecoin", () => {
   const user5 = anchor.web3.Keypair.generate();
   const rogue = anchor.web3.Keypair.generate();
   const fakeMinter = anchor.web3.Keypair.generate();
+  const tempMinter = anchor.web3.Keypair.generate();
 
   // Derived PDAs (populated after initialize)
   let configPda: PublicKey;
@@ -897,7 +898,43 @@ describe("solana-stablecoin", () => {
       });
     });
 
-    describe("Failure cases", () => {});
+    describe("Failure cases", () => {
+      it("non-admin cannot remove a minter (Unauthorised)", async () => {
+        await airdrop(provider.connection, tempMinter.publicKey);
+        const [tempMinterConfigPda] = deriveMinterConfig(
+          tempMinter.publicKey,
+          programId,
+        );
+
+        await program.methods
+          .configureMinter(new anchor.BN(100))
+          .accounts({
+            admin: admin.publicKey,
+            minter: tempMinter.publicKey,
+            config: configPda,
+            minterConfig: tempMinterConfigPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        try {
+          await program.methods
+            .removeMinter()
+            .accounts({
+              admin: rogue.publicKey,
+              minter: tempMinter.publicKey,
+              config: configPda,
+              minterConfig: tempMinterConfigPda,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown Unauthorised");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for unauthorized minter removal");
+        }
+      });
+    });
   });
 });
 
