@@ -848,6 +848,57 @@ describe("solana-stablecoin", () => {
       });
     });
   });
+
+  // ── REMOVE MINTER ─────────────────────────────────────────────────────────
+  describe("REMOVE MINTER", () => {
+    describe("Happy cases", () => {
+      it("admin can remove a minter and close the minter_config account", async () => {
+        const [minter2ConfigPda] = deriveMinterConfig(
+          minter2.publicKey,
+          programId,
+        );
+        const adminBalBefore = await provider.connection.getBalance(
+          admin.publicKey,
+        );
+
+        try {
+          await program.methods
+            .removeMinter()
+            .accounts({
+              admin: admin.publicKey,
+              minter: minter2.publicKey,
+              config: configPda,
+              minterConfig: minter2ConfigPda,
+            })
+            .signers([admin])
+            .rpc();
+        } catch (err: any) {
+          const logs = await getLogs(provider.connection, err);
+          console.log("\n[remove_minter] Error logs:\n", logs.join("\n"));
+          throw err;
+        }
+
+        const closedAccount = await provider.connection.getAccountInfo(
+          minter2ConfigPda,
+        );
+        const adminBalAfter = await provider.connection.getBalance(
+          admin.publicKey,
+        );
+
+        assert.strictEqual(
+          closedAccount,
+          null,
+          "minter_config account should be closed",
+        );
+        assert.ok(
+          adminBalAfter > adminBalBefore,
+          "admin should receive rent lamports",
+        );
+      });
+    });
+
+    describe("Failure cases", () => {});
+  });
 });
 
 async function airdrop(

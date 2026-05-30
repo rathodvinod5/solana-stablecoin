@@ -5,7 +5,7 @@ use crate::{
     states::{self, Config, MinterConfig} 
 };
 
-pub fn remover_minter(ctx: Context<RemoveMinter>) -> Result<()> {
+pub fn remove_minte(ctx: Context<RemoveMinter>) -> Result<()> {
     Ok(())
 }
 

@@ -47,4 +47,9 @@ use super::*;
         let _ = instructions::burn_tokens(ctx, amount);
         Ok(())
     }
+
+    pub fn remove_minter(ctx: Context<RemoveMinter>) -> Result<()> {
+        let _ = instructions::remove_minte(ctx)?;
+        Ok(())
+    }
 }
