@@ -27,4 +27,14 @@ use super::*;
         let _ = instructions::update_minter_config(ctx, updated_allowance)?;
         Ok(())
     }
+
+    pub fn pause_mint(ctx: Context<PauseMint>) -> Result<()> {
+        let _ = instructions::pause_mint(ctx)?;
+        Ok(())
+    }
+
+    pub fn unpause_mint(ctx: Context<UnPauseMint>) -> Result<()> {
+        let _ = instructions::unpause_mint(ctx)?;
+        Ok(())
+    }
 }

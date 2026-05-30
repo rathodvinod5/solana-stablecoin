@@ -319,6 +319,79 @@ describe("solana-stablecoin", () => {
       });
     });
   });
+
+  // ── PAUSE / UNPAUSE ────────────────────────────────────────────────────────
+  describe("PAUSE / UNPAUSE MINT", async () => {
+    describe("Happy cases", async () => {
+      it("admin can pause minting", async () => {
+        await program.methods
+          .pauseMint()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const config = await program.account.config.fetch(configPda);
+        assert.strictEqual(config.isPaused, true, "config should be paused");
+      });
+
+      it("admin can unpause minting", async () => {
+        await program.methods
+          .unpauseMint()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const config = await program.account.config.fetch(configPda);
+        assert.strictEqual(config.isPaused, false, "config should be unpaused");
+      });
+
+      it("pause → unpause → pause cycle works correctly", async () => {
+        for (const shouldBePaused of [true, false, true]) {
+          if (shouldBePaused) {
+            await program.methods
+              .pauseMint()
+              .accounts({
+                admin: admin.publicKey,
+                config: configPda,
+                systemProgram: anchor.web3.SystemProgram.programId,
+              })
+              .signers([admin])
+              .rpc();
+          } else {
+            await program.methods
+              .unpauseMint()
+              .accounts({
+                admin: admin.publicKey,
+                config: configPda,
+                systemProgram: anchor.web3.SystemProgram.programId,
+              })
+              .signers([admin])
+              .rpc();
+          }
+          const { isPaused } = await program.account.config.fetch(configPda);
+          assert.strictEqual(isPaused, shouldBePaused);
+        }
+        // Restore to unpaused for subsequent tests
+        await program.methods
+          .unpauseMint()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+      });
+    });
+  });
 });
 
 async function airdrop(
