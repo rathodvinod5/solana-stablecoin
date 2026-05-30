@@ -23,7 +23,11 @@ describe("solana-stablecoin", () => {
   const minter = anchor.web3.Keypair.generate();
   const minter2 = anchor.web3.Keypair.generate();
   const user = anchor.web3.Keypair.generate();
+  const user3 = anchor.web3.Keypair.generate();
+  const user4 = anchor.web3.Keypair.generate();
+  const user5 = anchor.web3.Keypair.generate();
   const rogue = anchor.web3.Keypair.generate();
+  const fakeMinter = anchor.web3.Keypair.generate();
 
   // Derived PDAs (populated after initialize)
   let configPda: PublicKey;
@@ -537,6 +541,165 @@ describe("solana-stablecoin", () => {
         );
       });
     });
+
+    describe("Failure cases", async () => {
+      before(async () => {
+        await airdrop(
+          provider.connection,
+          minter2.publicKey,
+          10 * LAMPORTS_PER_SOL,
+        );
+        await airdrop(
+          provider.connection,
+          user3.publicKey,
+          10 * LAMPORTS_PER_SOL,
+        );
+        await airdrop(
+          provider.connection,
+          user4.publicKey,
+          10 * LAMPORTS_PER_SOL,
+        );
+        await airdrop(provider.connection, fakeMinter.publicKey);
+        await airdrop(provider.connection, user5.publicKey);
+      });
+
+      it("minting fails when contract is paused (MintingPaused)", async () => {
+        await program.methods
+          .pauseMint()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        const [minterConfigPda] = deriveMinterConfig(
+          minter2.publicKey,
+          programId,
+        );
+
+        const user3Ata = getAssociatedTokenAddressSync(
+          mintPda,
+          user3.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        try {
+          await program.methods
+            .mintTokens(new anchor.BN(100))
+            .accounts({
+              minter: minter2.publicKey,
+              config: configPda,
+              minterConfig: minterConfigPda,
+              mint: mintPda,
+              user: user3.publicKey,
+              userAta: user3Ata,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([minter2])
+            .rpc();
+          assert.fail("Should have thrown MintingPaused");
+        } catch (err: any) {
+          const anchorErr = err as anchor.AnchorError;
+          const msg = anchorErr.error?.errorMessage ?? err.message;
+          assert.ok(
+            msg.includes("Minting paused"),
+            `Expected MintingPaused error, got: ${msg}`,
+          );
+        } finally {
+          await program.methods
+            .unpauseMint()
+            .accounts({
+              admin: admin.publicKey,
+              config: configPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([admin])
+            .rpc();
+        }
+      });
+
+      it("minting fails when amount exceeds remaining allowance (AllowanceExceeded)", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+
+        const user4Ata = getAssociatedTokenAddressSync(
+          mintPda,
+          user4.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        try {
+          await program.methods
+            .mintTokens(new anchor.BN(1))
+            .accounts({
+              minter: minter.publicKey,
+              config: configPda,
+              minterConfig: minterConfigPda,
+              mint: mintPda,
+              user: user4.publicKey,
+              userAta: user4Ata,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([minter])
+            .rpc();
+          assert.fail(
+            "Should have thrown AllowanceExceeded or InsufficientBalance",
+          );
+        } catch (err: any) {
+          const msg =
+            (err as anchor.AnchorError).error?.errorMessage ?? err.message;
+          const isExpectedError =
+            msg.includes("Allowance exceeded") ||
+            msg.includes("Insufficient balance");
+          assert.ok(isExpectedError, `Unexpected error: ${msg}`);
+        }
+      });
+
+      it("unconfigured minter cannot mint tokens", async () => {
+        const [fakeMinterConfigPda] = deriveMinterConfig(
+          fakeMinter.publicKey,
+          programId,
+        );
+
+        const user5Ata = getAssociatedTokenAddressSync(
+          mintPda,
+          user5.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        try {
+          await program.methods
+            .mintTokens(new anchor.BN(100))
+            .accounts({
+              minter: fakeMinter.publicKey,
+              config: configPda,
+              minterConfig: fakeMinterConfigPda,
+              mint: mintPda,
+              user: user5.publicKey,
+              userAta: user5Ata,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+              associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([fakeMinter])
+            .rpc();
+          assert.fail("Should have thrown for unconfigured minter");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for unconfigured minter");
+        }
+      });
+    });
   });
 });
 
@@ -567,4 +730,38 @@ function deriveMinterConfig(
     [Buffer.from("minter"), minterKey.toBuffer()],
     programId,
   );
+}
+
+async function logBalances(
+  connection: any,
+  label: string,
+  accounts: { name: string; pubkey: PublicKey }[],
+) {
+  console.log(`\n── Balances [${label}] ──`);
+  for (const { name, pubkey } of accounts) {
+    const bal = await connection.getBalance(pubkey);
+    console.log(
+      `  ${name}: ${bal / LAMPORTS_PER_SOL} SOL  (${pubkey.toBase58()})`,
+    );
+  }
+}
+
+async function logTokenBalance(connection: any, label: string, ata: PublicKey) {
+  try {
+    const bal = await connection.getTokenAccountBalance(ata);
+    console.log(`  [Token] ${label}: ${bal.value.amount} (${ata.toBase58()})`);
+  } catch {
+    console.log(
+      `  [Token] ${label}: ATA does not exist yet (${ata.toBase58()})`,
+    );
+  }
+}
+
+async function getLogs(connection: any, err: any): Promise<string[]> {
+  if (err?.logs) return err.logs;
+  try {
+    return (await err.getLogs?.()) ?? [];
+  } catch {
+    return [];
+  }
 }
