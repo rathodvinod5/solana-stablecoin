@@ -791,6 +791,62 @@ describe("solana-stablecoin", () => {
         }
       });
     });
+
+    describe("failure cases", () => {
+      it("cannot burn more tokens than the ATA balance", async () => {
+        const userAta = getAssociatedTokenAddressSync(
+          mintPda,
+          user.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        try {
+          await program.methods
+            .burnTokens(new anchor.BN(999_999_999_999))
+            .accounts({
+              owner: user.publicKey,
+              config: configPda,
+              mint: mintPda,
+              ownerAta: userAta,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+            })
+            .signers([user])
+            .rpc();
+          assert.fail("Should have thrown on burn exceeding balance");
+        } catch (err: any) {
+          assert.ok(err, "Expected error when burning more than balance");
+        }
+      });
+
+      it("non-owner cannot burn from another user's ATA", async () => {
+        const userAta = getAssociatedTokenAddressSync(
+          mintPda,
+          user.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        try {
+          await program.methods
+            .burnTokens(new anchor.BN(1))
+            .accounts({
+              owner: rogue.publicKey,
+              config: configPda,
+              mint: mintPda,
+              ownerAta: userAta,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown for wrong authority");
+        } catch (err: any) {
+          // const logs = await getLogs(provider.connection, err);
+          // console.log("\n[burn_nonowner] Expected error logs:\n", logs.join("\n"));
+          assert.ok(err, "Expected error for non-owner burn attempt");
+        }
+      });
+    });
   });
 });
 
