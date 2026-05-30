@@ -391,6 +391,64 @@ describe("solana-stablecoin", () => {
           .rpc();
       });
     });
+
+    describe("Failure cases", async () => {
+      it("non-admin cannot pause mint (Unauthorised)", async () => {
+        try {
+          await program.methods
+            .pauseMint()
+            .accounts({
+              admin: rogue.publicKey,
+              config: configPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown Unauthorised");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for unauthorized pause");
+        }
+      });
+
+      it("non-admin cannot unpause mint (Unauthorised)", async () => {
+        // First pause legitimately
+        await program.methods
+          .pauseMint()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+
+        try {
+          await program.methods
+            .unpauseMint()
+            .accounts({
+              admin: rogue.publicKey,
+              config: configPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([rogue])
+            .rpc();
+          assert.fail("Should have thrown Unauthorised");
+        } catch (err: any) {
+          assert.ok(err, "Expected error for unauthorized unpause");
+        } finally {
+          // Restore
+          await program.methods
+            .unpauseMint()
+            .accounts({
+              admin: admin.publicKey,
+              config: configPda,
+              systemProgram: anchor.web3.SystemProgram.programId,
+            })
+            .signers([admin])
+            .rpc();
+        }
+      });
+    });
   });
 });
 
