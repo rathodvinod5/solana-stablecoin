@@ -42,4 +42,9 @@ use super::*;
         let _ = instructions::mint_tokens(ctx, amount)?;
         Ok(())
     }
+
+    pub fn burn_tokens(ctx: Context<BurnTokens>, amount: u64) -> Result<()> {
+        let _ = instructions::burn_tokens(ctx, amount);
+        Ok(())
+    }
 }

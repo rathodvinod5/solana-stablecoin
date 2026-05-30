@@ -62,12 +62,12 @@ describe("solana-stablecoin", () => {
     });
 
     describe("VALIDATE SOL AMOUNT", async () => {
-      it("A. 1. Admin has SOL balance", async () => {
+      it("Admin has SOL balance", async () => {
         const bal = await provider.connection.getBalance(admin.publicKey);
         assert.ok(bal >= LAMPORTS_PER_SOL, "admin should have at least 1 SOL");
       });
 
-      it("A. 2. Minter has SOL balance", async () => {
+      it("Minter has SOL balance", async () => {
         const bal = await provider.connection.getBalance(minter.publicKey);
         assert.ok(bal >= LAMPORTS_PER_SOL, "minter should have at least 1 SOL");
       });
@@ -81,7 +81,7 @@ describe("solana-stablecoin", () => {
     });
 
     describe("Happy cases", () => {
-      it("B. 1. initializes the config and mint accounts successfully", async () => {
+      it("initializes the config and mint accounts successfully", async () => {
         await program.methods
           .initialize()
           .accounts({
@@ -107,7 +107,7 @@ describe("solana-stablecoin", () => {
         );
       });
 
-      it("B. 2. config PDA stores correct bumps", async () => {
+      it("config PDA stores correct bumps", async () => {
         const config = await program.account.config.fetch(configPda);
         const [, expectedConfigBump] = deriveConfig(programId);
         const [, expectedMintBump] = deriveMint(programId);
@@ -117,7 +117,7 @@ describe("solana-stablecoin", () => {
     });
 
     describe("Failure cases", () => {
-      it("C. 1. cannot initialize twice (config PDA already exists)", async () => {
+      it("cannot initialize twice (config PDA already exists)", async () => {
         try {
           await program.methods
             .initialize()
@@ -142,7 +142,7 @@ describe("solana-stablecoin", () => {
     const allowance = new anchor.BN(1_000_000); // 1 token (6 decimals)
 
     describe("Happy cases", () => {
-      it("D. 1. admin can configure a minter with an allowance", async () => {
+      it("admin can configure a minter with an allowance", async () => {
         const [minterConfigPda] = deriveMinterConfig(
           minter.publicKey,
           programId,
@@ -174,7 +174,7 @@ describe("solana-stablecoin", () => {
         );
       });
 
-      it("C. 2. admin can configure a second minter independently", async () => {
+      it("admin can configure a second minter independently", async () => {
         const [minter2ConfigPda] = deriveMinterConfig(
           minter2.publicKey,
           programId,
@@ -697,6 +697,97 @@ describe("solana-stablecoin", () => {
           assert.fail("Should have thrown for unconfigured minter");
         } catch (err: any) {
           assert.ok(err, "Expected error for unconfigured minter");
+        }
+      });
+    });
+  });
+
+  // ── BURN TOKENS ────────────────────────────────────────────────────────────
+  describe("BURN TOKENS", () => {
+    describe("Happy cases", () => {
+      it("token holder can burn their tokens", async () => {
+        const userAta = getAssociatedTokenAddressSync(
+          mintPda,
+          user.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        const balBefore = await provider.connection.getTokenAccountBalance(
+          userAta,
+        );
+        const burnAmount = new anchor.BN(100_000);
+
+        try {
+          await program.methods
+            .burnTokens(burnAmount)
+            .accounts({
+              owner: user.publicKey,
+              config: configPda,
+              mint: mintPda,
+              ownerAta: userAta,
+              tokenProgram: TOKEN_2022_PROGRAM_ID,
+            })
+            .signers([user])
+            .rpc();
+        } catch (err: any) {
+          throw err;
+        }
+
+        const balAfter = await provider.connection.getTokenAccountBalance(
+          userAta,
+        );
+        const expectedBalance = new anchor.BN(balBefore.value.amount).sub(
+          burnAmount,
+        );
+        assert.ok(
+          new anchor.BN(balAfter.value.amount).eq(expectedBalance),
+          "balance should decrease by burn amount",
+        );
+      });
+
+      it("burning all remaining tokens reduces balance to zero", async () => {
+        const userAta = getAssociatedTokenAddressSync(
+          mintPda,
+          user.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        const balInfo = await provider.connection.getTokenAccountBalance(
+          userAta,
+        );
+        const remaining = new anchor.BN(balInfo.value.amount);
+        // console.log(`\n[burn_all] remaining balance: ${remaining.toString()}`);
+
+        if (remaining.gtn(0)) {
+          try {
+            await program.methods
+              .burnTokens(remaining)
+              .accounts({
+                owner: user.publicKey,
+                config: configPda,
+                mint: mintPda,
+                ownerAta: userAta,
+                tokenProgram: TOKEN_2022_PROGRAM_ID,
+              })
+              .signers([user])
+              .rpc();
+          } catch (err: any) {
+            // const logs = await getLogs(provider.connection, err);
+            // console.log("\n[burn_all] Error logs:\n", logs.join("\n"));
+            throw err;
+          }
+
+          const balAfter = await provider.connection.getTokenAccountBalance(
+            userAta,
+          );
+          // console.log(`\n[burn_all] balance after: ${balAfter.value.amount}`);
+          assert.strictEqual(
+            balAfter.value.amount,
+            "0",
+            "balance should be zero after full burn",
+          );
         }
       });
     });
