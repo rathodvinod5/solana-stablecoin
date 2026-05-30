@@ -20,7 +20,7 @@ pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
     let config = &mut ctx.accounts.config;
     let minter_config = &mut ctx.accounts.minter_config;
 
-    require!(config.is_paused, StableCoinError::MintingPaused);
+    require!(!config.is_paused, StableCoinError::MintingPaused);
 
     let amount_remaining = minter_config.allowance.checked_sub(minter_config.total_minted)
         .ok_or(StableCoinError::AllowanceExceeded)?;
@@ -83,6 +83,7 @@ pub struct MintTokens<'info> {
 
     #[account(
         init,
+        // init_if_needed,
         payer = minter,
         associated_token::mint = mint,
         associated_token::authority = user,

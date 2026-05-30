@@ -37,4 +37,9 @@ use super::*;
         let _ = instructions::unpause_mint(ctx)?;
         Ok(())
     }
+
+    pub fn mint_tokens(ctx: Context<MintTokens>, amount: u64) -> Result<()> {
+        let _ = instructions::mint_tokens(ctx, amount)?;
+        Ok(())
+    }
 }

@@ -450,6 +450,94 @@ describe("solana-stablecoin", () => {
       });
     });
   });
+
+  // ── MINT TOKENS ────────────────────────────────────────────────────────────
+  describe("MINT TOKENS", async () => {
+    const mintAmount = new anchor.BN(500_000); // within the 2_000_000 allowance
+
+    describe("Happy cases", async () => {
+      it("minter can mint tokens to a user when unpaused", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+        const userAta = getAssociatedTokenAddressSync(
+          mintPda,
+          user.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        await program.methods
+          .mintTokens(mintAmount)
+          .accounts({
+            minter: minter.publicKey,
+            config: configPda,
+            minterConfig: minterConfigPda,
+            mint: mintPda,
+            user: user.publicKey,
+            userAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([minter])
+          .rpc();
+
+        const mc = await program.account.minterConfig.fetch(minterConfigPda);
+        assert.ok(
+          mc.totalMinted.eq(mintAmount),
+          "total_minted should equal minted amount",
+        );
+      });
+
+      it("minter can mint multiple times up to the allowance", async () => {
+        const [minterConfigPda] = deriveMinterConfig(
+          minter.publicKey,
+          programId,
+        );
+        const mcBefore = await program.account.minterConfig.fetch(
+          minterConfigPda,
+        );
+        const remaining = mcBefore.allowance.sub(mcBefore.totalMinted);
+
+        // Use a fresh user so the ATA doesn't already exist
+        const user2 = anchor.web3.Keypair.generate();
+        await airdrop(provider.connection, user2.publicKey);
+
+        const user2Ata = getAssociatedTokenAddressSync(
+          mintPda,
+          user2.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        await program.methods
+          .mintTokens(remaining)
+          .accounts({
+            minter: minter.publicKey,
+            config: configPda,
+            minterConfig: minterConfigPda,
+            mint: mintPda,
+            user: user2.publicKey,
+            userAta: user2Ata,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([minter])
+          .rpc();
+
+        const mcAfter = await program.account.minterConfig.fetch(
+          minterConfigPda,
+        );
+        assert.ok(
+          mcAfter.totalMinted.eq(mcBefore.allowance),
+          "should have reached full allowance",
+        );
+      });
+    });
+  });
 });
 
 async function airdrop(
