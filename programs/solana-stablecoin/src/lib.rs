@@ -42,4 +42,14 @@ use super::*;
         let _ = instructions::mint_tokens(ctx, amount)?;
         Ok(())
     }
+
+    pub fn burn_tokens(ctx: Context<BurnTokens>, amount: u64) -> Result<()> {
+        let _ = instructions::burn_tokens(ctx, amount);
+        Ok(())
+    }
+
+    pub fn remove_minter(ctx: Context<RemoveMinter>) -> Result<()> {
+        let _ = instructions::remove_minte(ctx)?;
+        Ok(())
+    }
 }
