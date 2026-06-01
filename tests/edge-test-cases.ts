@@ -499,6 +499,188 @@ describe("solana-stablecoin [edge cases]", () => {
       );
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 3. REMOVE MINTER EDGE CASES
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("REMOVE MINTER EDGE CASES", () => {
+    it("removed minter cannot mint after being removed", async () => {
+      const removableMinter = Keypair.generate();
+      await airdrop(provider.connection, removableMinter.publicKey);
+      const [removableMinterPda] = deriveMinterConfig(
+        removableMinter.publicKey,
+        programId,
+      );
+
+      // Configure then remove
+      await program.methods
+        .configureMinter(new anchor.BN(5_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: removableMinter.publicKey,
+          config: configPda,
+          minterConfig: removableMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      await program.methods
+        .removeMinter()
+        .accounts({
+          admin: admin.publicKey,
+          minter: removableMinter.publicKey,
+          config: configPda,
+          minterConfig: removableMinterPda,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Now try to mint — should fail because minter_config is closed
+      const recipient = Keypair.generate();
+      await airdrop(provider.connection, recipient.publicKey);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(100))
+          .accounts({
+            minter: removableMinter.publicKey,
+            config: configPda,
+            minterConfig: removableMinterPda,
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([removableMinter])
+          .rpc();
+        assert.fail("Should have thrown — minter was removed");
+      } catch (err: any) {
+        assert.ok(err, "Removed minter should not be able to mint");
+      }
+    });
+
+    it("removed minter can be re-configured by admin", async () => {
+      const readdMinter = Keypair.generate();
+      await airdrop(provider.connection, readdMinter.publicKey);
+      const [readdMinterPda] = deriveMinterConfig(
+        readdMinter.publicKey,
+        programId,
+      );
+
+      // Configure → remove → re-configure
+      await program.methods
+        .configureMinter(new anchor.BN(1_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: readdMinter.publicKey,
+          config: configPda,
+          minterConfig: readdMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      await program.methods
+        .removeMinter()
+        .accounts({
+          admin: admin.publicKey,
+          minter: readdMinter.publicKey,
+          config: configPda,
+          minterConfig: readdMinterPda,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Re-configure with a new allowance
+      try {
+        await program.methods
+          .configureMinter(new anchor.BN(9_000))
+          .accounts({
+            admin: admin.publicKey,
+            minter: readdMinter.publicKey,
+            config: configPda,
+            minterConfig: readdMinterPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log("\n[re_configure_minter] Error logs:\n", logs.join("\n"));
+        throw err;
+      }
+
+      const mc = await program.account.minterConfig.fetch(readdMinterPda);
+      // console.log(`\n[re_configure_minter] new allowance: ${mc.allowance}, totalMinted: ${mc.totalMinted}`);
+      assert.ok(
+        mc.allowance.eqn(9_000),
+        "re-configured allowance should be 9_000",
+      );
+      assert.ok(
+        mc.totalMinted.eqn(0),
+        "totalMinted should reset to 0 on re-configure",
+      );
+      assert.strictEqual(mc.isInitialized, true, "should be initialized again");
+    });
+
+    it("admin rent is returned when minter_config is closed", async () => {
+      const closeMinter = Keypair.generate();
+      await airdrop(provider.connection, closeMinter.publicKey);
+      const [closeMinterPda] = deriveMinterConfig(
+        closeMinter.publicKey,
+        programId,
+      );
+
+      await program.methods
+        .configureMinter(new anchor.BN(100))
+        .accounts({
+          admin: admin.publicKey,
+          minter: closeMinter.publicKey,
+          config: configPda,
+          minterConfig: closeMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const adminBalBefore = await provider.connection.getBalance(
+        admin.publicKey,
+      );
+
+      await program.methods
+        .removeMinter()
+        .accounts({
+          admin: admin.publicKey,
+          minter: closeMinter.publicKey,
+          config: configPda,
+          minterConfig: closeMinterPda,
+        })
+        .signers([admin])
+        .rpc();
+
+      const adminBalAfter = await provider.connection.getBalance(
+        admin.publicKey,
+      );
+      console.log(
+        `\n[rent_returned] before: ${
+          adminBalBefore / LAMPORTS_PER_SOL
+        } SOL, after: ${adminBalAfter / LAMPORTS_PER_SOL} SOL`,
+      );
+      assert.ok(
+        adminBalAfter > adminBalBefore,
+        "admin should receive rent lamports back",
+      );
+    });
+  });
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
