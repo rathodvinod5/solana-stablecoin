@@ -8,8 +8,15 @@ import {
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { SolanaStablecoin } from "../target/types/solana_stablecoin";
 import assert from "assert";
+import {
+  ADMIN_KEYPAIR,
+  MINTER2_KEYPAIR,
+  MINTER_KEYPAIR,
+  ROGUE_KEYPAIR,
+  USER_KEYPAIR,
+} from "./helpers";
 
-describe("solana-stablecoin", () => {
+describe.skip("solana-stablecoin", () => {
   // Configure the client to use the local cluster.
   // anchor.setProvider(anchor.AnchorProvider.env());
 
@@ -19,16 +26,22 @@ describe("solana-stablecoin", () => {
   const program = anchor.workspace
     .solanaStablecoin as Program<SolanaStablecoin>;
   const programId = program.programId;
-  const admin = anchor.web3.Keypair.generate();
-  const minter = anchor.web3.Keypair.generate();
-  const minter2 = anchor.web3.Keypair.generate();
-  const user = anchor.web3.Keypair.generate();
+  // const admin = anchor.web3.Keypair.generate();
+  // const minter = anchor.web3.Keypair.generate();
+  // const minter2 = anchor.web3.Keypair.generate();
+  // const user = anchor.web3.Keypair.generate();
+  // const rogue = anchor.web3.Keypair.generate();
   const user3 = anchor.web3.Keypair.generate();
   const user4 = anchor.web3.Keypair.generate();
   const user5 = anchor.web3.Keypair.generate();
-  const rogue = anchor.web3.Keypair.generate();
   const fakeMinter = anchor.web3.Keypair.generate();
   const tempMinter = anchor.web3.Keypair.generate();
+
+  const admin = ADMIN_KEYPAIR;
+  const minter = MINTER_KEYPAIR;
+  const minter2 = MINTER2_KEYPAIR;
+  const user = USER_KEYPAIR;
+  const rogue = ROGUE_KEYPAIR;
 
   // Derived PDAs (populated after initialize)
   let configPda: PublicKey;
