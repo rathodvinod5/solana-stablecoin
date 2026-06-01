@@ -670,14 +670,177 @@ describe("solana-stablecoin [edge cases]", () => {
       const adminBalAfter = await provider.connection.getBalance(
         admin.publicKey,
       );
-      console.log(
-        `\n[rent_returned] before: ${
-          adminBalBefore / LAMPORTS_PER_SOL
-        } SOL, after: ${adminBalAfter / LAMPORTS_PER_SOL} SOL`,
-      );
+      // console.log(
+      //   `\n[rent_returned] before: ${
+      //     adminBalBefore / LAMPORTS_PER_SOL
+      //   } SOL, after: ${adminBalAfter / LAMPORTS_PER_SOL} SOL`,
+      // );
       assert.ok(
         adminBalAfter > adminBalBefore,
         "admin should receive rent lamports back",
+      );
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 4. BURN EDGE CASES
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("BURN EDGE CASES", async () => {
+    let burnUser: Keypair;
+    let burnUserAta: PublicKey;
+
+    before(async () => {
+      // Mint some tokens to a fresh user for burn tests
+      burnUser = Keypair.generate();
+      await airdrop(provider.connection, burnUser.publicKey);
+
+      burnUserAta = getAssociatedTokenAddressSync(
+        mintPda,
+        burnUser.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      const [minterConfigPda] = deriveMinterConfig(minter.publicKey, programId);
+      await airdrop(provider.connection, minter.publicKey); // top up minter
+
+      await program.methods
+        .mintTokens(new anchor.BN(10_000))
+        .accounts({
+          minter: minter.publicKey,
+          config: configPda,
+          minterConfig: minterConfigPda,
+          mint: mintPda,
+          user: burnUser.publicKey,
+          userAta: burnUserAta,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([minter])
+        .rpc();
+    });
+
+    it("burning 0 tokens is a no-op / should not change balance", async () => {
+      const balBefore = await provider.connection.getTokenAccountBalance(
+        burnUserAta,
+      );
+
+      try {
+        await program.methods
+          .burnTokens(new anchor.BN(0))
+          .accounts({
+            owner: burnUser.publicKey,
+            config: configPda,
+            mint: mintPda,
+            ownerAta: burnUserAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+          })
+          .signers([burnUser])
+          .rpc();
+
+        const balAfter = await provider.connection.getTokenAccountBalance(
+          burnUserAta,
+        );
+        assert.strictEqual(
+          balAfter.value.amount,
+          balBefore.value.amount,
+          "balance should not change after 0-burn",
+        );
+        // console.log("\n[zero_burn] Program allowed 0-amount burn (no-op)");
+      } catch (err: any) {
+        const logs = await getLogs(provider.connection, err);
+        console.log(
+          "\n[zero_burn] Program rejected 0-amount burn (also valid):\n",
+          logs.join("\n"),
+        );
+        assert.ok(err, "Program correctly rejected 0-amount burn");
+      }
+    });
+
+    it("burning works when contract is paused (burn is never gated by pause)", async () => {
+      // Pause the contract
+      await program.methods
+        .pauseMint()
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const balBefore = await provider.connection.getTokenAccountBalance(
+        burnUserAta,
+      );
+      const burnAmount = new anchor.BN(1_000);
+
+      try {
+        await program.methods
+          .burnTokens(burnAmount)
+          .accounts({
+            owner: burnUser.publicKey,
+            config: configPda,
+            mint: mintPda,
+            ownerAta: burnUserAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+          })
+          .signers([burnUser])
+          .rpc();
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log("\n[burn_while_paused] Error logs:\n", logs.join("\n"));
+        throw err;
+      } finally {
+        // Always unpause
+        await program.methods
+          .unpauseMint()
+          .accounts({
+            admin: admin.publicKey,
+            config: configPda,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([admin])
+          .rpc();
+      }
+
+      const balAfter = await provider.connection.getTokenAccountBalance(
+        burnUserAta,
+      );
+      const expected = new anchor.BN(balBefore.value.amount).sub(burnAmount);
+      // console.log(`\n[burn_while_paused] balance went from ${balBefore.value.amount} to ${balAfter.value.amount}`);
+      assert.ok(
+        new anchor.BN(balAfter.value.amount).eq(expected),
+        "burn should succeed even when minting is paused",
+      );
+    });
+
+    it("partial burn leaves correct remaining balance", async () => {
+      const balBefore = await provider.connection.getTokenAccountBalance(
+        burnUserAta,
+      );
+      const totalBal = new anchor.BN(balBefore.value.amount);
+      const burnAmount = totalBal.divn(2); // burn exactly half
+
+      await program.methods
+        .burnTokens(burnAmount)
+        .accounts({
+          owner: burnUser.publicKey,
+          config: configPda,
+          mint: mintPda,
+          ownerAta: burnUserAta,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+        })
+        .signers([burnUser])
+        .rpc();
+
+      const balAfter = await provider.connection.getTokenAccountBalance(
+        burnUserAta,
+      );
+      const expectedBal = totalBal.sub(burnAmount);
+      assert.ok(
+        new anchor.BN(balAfter.value.amount).eq(expectedBal),
+        "remaining balance should be exactly half after partial burn",
       );
     });
   });
