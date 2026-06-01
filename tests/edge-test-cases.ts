@@ -74,6 +74,9 @@ describe("solana-stablecoin [edge cases]", () => {
     });
   });
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // 1. ALLOWANCE BOUNDARY CONDITIONS
+  // ══════════════════════════════════════════════════════════════════════════
   describe("ALLOWANCE BOUNDARY CONDITION", () => {
     it("Minting exactly 0 tokens is a no-op / should not increase total_minted", async () => {
       const [minterConfigPda] = deriveMinterConfig(minter.publicKey, programId);
@@ -306,6 +309,194 @@ describe("solana-stablecoin [edge cases]", () => {
         // );
         assert.ok(err, "Expected error for zero-allowance minter");
       }
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 2. ALLOWANCE UPDATE EDGE CASES
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("ALLOWANCE UPDATE EDGE CASES", () => {
+    let updateMinter: Keypair;
+    let updateMinterPda: PublicKey;
+
+    before(async () => {
+      updateMinter = Keypair.generate();
+      await airdrop(provider.connection, updateMinter.publicKey);
+      [updateMinterPda] = deriveMinterConfig(updateMinter.publicKey, programId);
+
+      await program.methods
+        .configureMinter(new anchor.BN(5_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: updateMinter.publicKey,
+          config: configPda,
+          minterConfig: updateMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+    });
+
+    it("Admin can reduce allowance below the current total_minted (does not revert past mints)", async () => {
+      // Mint some tokens first
+      const recipient = Keypair.generate();
+      await airdrop(provider.connection, recipient.publicKey);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      await program.methods
+        .mintTokens(new anchor.BN(3_000))
+        .accounts({
+          minter: updateMinter.publicKey,
+          config: configPda,
+          minterConfig: updateMinterPda,
+          mint: mintPda,
+          user: recipient.publicKey,
+          userAta: recipientAta,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([updateMinter])
+        .rpc();
+
+      // Now reduce allowance to 1_000 (less than total_minted of 3_000)
+      await program.methods
+        .updateMinterConfig(new anchor.BN(1_000))
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          minterConfig: updateMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const mc = await program.account.minterConfig.fetch(updateMinterPda);
+      // console.log(
+      //   `\n[reduce_allowance] allowance: ${mc.allowance}, totalMinted: ${mc.totalMinted}`,
+      // );
+      assert.ok(
+        mc.allowance.eqn(1_000),
+        "allowance should be updated to 1_000",
+      );
+      assert.ok(mc.totalMinted.eqn(3_000), "past mints should not be reverted");
+    });
+
+    it("minting fails after allowance is reduced below total_minted", async () => {
+      // updateMinter now has allowance=1_000 and totalMinted=3_000
+      // so remaining = 1_000 - 3_000 which underflows → AllowanceExceeded
+      const recipient = Keypair.generate();
+      await airdrop(provider.connection, recipient.publicKey);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(1))
+          .accounts({
+            minter: updateMinter.publicKey,
+            config: configPda,
+            minterConfig: updateMinterPda,
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([updateMinter])
+          .rpc();
+        assert.fail("Should have thrown after allowance < totalMinted");
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log("\n[allowance_below_minted] Expected error logs:\n", logs.join("\n"));
+        assert.ok(err, "Expected error when allowance is below total_minted");
+      }
+    });
+
+    it("admin can increase allowance and minter can mint again", async () => {
+      // Increase allowance back to 10_000
+      await program.methods
+        .updateMinterConfig(new anchor.BN(10_000))
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          minterConfig: updateMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const recipient = Keypair.generate();
+      await airdrop(provider.connection, recipient.publicKey);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(500))
+          .accounts({
+            minter: updateMinter.publicKey,
+            config: configPda,
+            minterConfig: updateMinterPda,
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([updateMinter])
+          .rpc();
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log("\n[increase_allowance] Error logs:\n", logs.join("\n"));
+        throw err;
+      }
+
+      const mc = await program.account.minterConfig.fetch(updateMinterPda);
+      // console.log(`\n[increase_allowance] totalMinted after re-mint: ${mc.totalMinted}`);
+      assert.ok(mc.totalMinted.eqn(3_500), "totalMinted should be 3_000 + 500");
+    });
+
+    it("updating allowance to same value is a no-op", async () => {
+      const mcBefore = await program.account.minterConfig.fetch(
+        updateMinterPda,
+      );
+
+      await program.methods
+        .updateMinterConfig(mcBefore.allowance)
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          minterConfig: updateMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const mcAfter = await program.account.minterConfig.fetch(updateMinterPda);
+      assert.ok(
+        mcAfter.allowance.eq(mcBefore.allowance),
+        "allowance should remain unchanged",
+      );
+      assert.ok(
+        mcAfter.totalMinted.eq(mcBefore.totalMinted),
+        "totalMinted should remain unchanged",
+      );
     });
   });
 });
