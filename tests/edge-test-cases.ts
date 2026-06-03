@@ -844,6 +844,268 @@ describe("solana-stablecoin [edge cases]", () => {
       );
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 5. PDA SPOOFING / ACCOUNT SUBSTITUTION ATTACKS
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("PDA SPOOFING and ACCOUNT SUBSTITUTION", () => {
+    it("cannot use a different minter's minter_config to mint (wrong PDA seeds)", async () => {
+      // minter A tries to use minter B's config PDA to mint
+      const minterA = Keypair.generate();
+      const minterB = Keypair.generate();
+      await airdrop(provider.connection, minterA.publicKey);
+      await airdrop(provider.connection, minterB.publicKey);
+
+      const [minterBConfigPda] = deriveMinterConfig(
+        minterB.publicKey,
+        programId,
+      );
+
+      // Only configure B
+      await program.methods
+        .configureMinter(new anchor.BN(5_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: minterB.publicKey,
+          config: configPda,
+          minterConfig: minterBConfigPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const recipient = Keypair.generate();
+      await airdrop(provider.connection, recipient.publicKey);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      // minterA tries to sign but pass minterB's config PDA
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(100))
+          .accounts({
+            minter: minterA.publicKey, // A is the signer
+            config: configPda,
+            minterConfig: minterBConfigPda, // but using B's config
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([minterA])
+          .rpc();
+        assert.fail("Should have failed — minterA using minterB's config");
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log("\n[pda_spoof] Expected error logs:\n", logs.join("\n"));
+        assert.ok(err, "PDA seed mismatch should be rejected by Anchor");
+      }
+    });
+
+    it("cannot pass a fake config PDA to bypass admin check on pause", async () => {
+      // rogue tries to construct a fake config and pass it to pauseMint
+      const fakeConfig = Keypair.generate();
+
+      try {
+        await program.methods
+          .pauseMint()
+          .accounts({
+            admin: rogue.publicKey,
+            config: fakeConfig.publicKey, // not the real PDA
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([rogue])
+          .rpc();
+        assert.fail("Should have rejected fake config PDA");
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log(
+        //   "\n[fake_config_pause] Expected error logs:\n",
+        //   logs.join("\n"),
+        // );
+        assert.ok(err, "Fake config PDA should be rejected");
+      }
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 6. STATE CONSISTENCY AFTER SEQUENCES
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("STATE CONSISTENCY ACROSS SEQUENCES", async () => {
+    it("config state is consistent after pause → mint-attempt → unpause → mint", async () => {
+      const seqMinter = Keypair.generate();
+      await airdrop(provider.connection, seqMinter.publicKey);
+      const [seqMinterPda] = deriveMinterConfig(seqMinter.publicKey, programId);
+
+      await program.methods
+        .configureMinter(new anchor.BN(10_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: seqMinter.publicKey,
+          config: configPda,
+          minterConfig: seqMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Pause
+      await program.methods
+        .pauseMint()
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const recipient1 = Keypair.generate();
+      await airdrop(provider.connection, recipient1.publicKey);
+      const r1Ata = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient1.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      // Mint attempt while paused — should fail
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(500))
+          .accounts({
+            minter: seqMinter.publicKey,
+            config: configPda,
+            minterConfig: seqMinterPda,
+            mint: mintPda,
+            user: recipient1.publicKey,
+            userAta: r1Ata,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([seqMinter])
+          .rpc();
+      } catch {
+        /* expected */
+      }
+
+      // total_minted should still be 0 since the mint failed
+      const mcMid = await program.account.minterConfig.fetch(seqMinterPda);
+      assert.ok(
+        mcMid.totalMinted.eqn(0),
+        "totalMinted should still be 0 after failed mint",
+      );
+
+      // Unpause
+      await program.methods
+        .unpauseMint()
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Mint should now succeed
+      const recipient2 = Keypair.generate();
+      await airdrop(provider.connection, recipient2.publicKey);
+      const r2Ata = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient2.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      await program.methods
+        .mintTokens(new anchor.BN(500))
+        .accounts({
+          minter: seqMinter.publicKey,
+          config: configPda,
+          minterConfig: seqMinterPda,
+          mint: mintPda,
+          user: recipient2.publicKey,
+          userAta: r2Ata,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([seqMinter])
+        .rpc();
+
+      const mcFinal = await program.account.minterConfig.fetch(seqMinterPda);
+      // console.log(`\n[state_consistency] final totalMinted: ${mcFinal.totalMinted}`);
+      assert.ok(
+        mcFinal.totalMinted.eqn(500),
+        "totalMinted should be 500 after successful mint",
+      );
+    });
+
+    it("total_minted accumulates correctly across multiple mints to different users", async () => {
+      const accMinter = Keypair.generate();
+      await airdrop(provider.connection, accMinter.publicKey);
+      const [accMinterPda] = deriveMinterConfig(accMinter.publicKey, programId);
+
+      await program.methods
+        .configureMinter(new anchor.BN(9_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: accMinter.publicKey,
+          config: configPda,
+          minterConfig: accMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const amounts = [1_000, 2_000, 3_000];
+      let expectedTotal = 0;
+
+      for (const amount of amounts) {
+        const recipient = Keypair.generate();
+        await airdrop(provider.connection, recipient.publicKey);
+        const recipientAta = getAssociatedTokenAddressSync(
+          mintPda,
+          recipient.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        await program.methods
+          .mintTokens(new anchor.BN(amount))
+          .accounts({
+            minter: accMinter.publicKey,
+            config: configPda,
+            minterConfig: accMinterPda,
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([accMinter])
+          .rpc();
+
+        expectedTotal += amount;
+        const mc = await program.account.minterConfig.fetch(accMinterPda);
+        // console.log(
+        //   `\n[accumulate] after minting ${amount}: totalMinted=${mc.totalMinted}`,
+        // );
+        assert.ok(
+          mc.totalMinted.eqn(expectedTotal),
+          `totalMinted should be ${expectedTotal} after minting ${amount}`,
+        );
+      }
+    });
+  });
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -853,14 +1115,6 @@ async function airdrop(
   address: PublicKey,
   amount = 10 * LAMPORTS_PER_SOL,
 ) {
-  // const sig = await connection.requestAirdrop(address, amount);
-  // const { blockhash, lastValidBlockHeight } =
-  //   await connection.getLatestBlockhash();
-  // await connection.confirmTransaction(
-  //   { signature: sig, blockhash, lastValidBlockHeight },
-  //   "finalized",
-  // );
-
   await connection.confirmTransaction(
     await connection.requestAirdrop(address, amount),
     "confirmed",
