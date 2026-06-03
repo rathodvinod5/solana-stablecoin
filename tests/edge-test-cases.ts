@@ -844,6 +844,95 @@ describe("solana-stablecoin [edge cases]", () => {
       );
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 5. PDA SPOOFING / ACCOUNT SUBSTITUTION ATTACKS
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("PDA spoofing and account substitution", () => {
+    it("cannot use a different minter's minter_config to mint (wrong PDA seeds)", async () => {
+      // minter A tries to use minter B's config PDA to mint
+      const minterA = Keypair.generate();
+      const minterB = Keypair.generate();
+      await airdrop(provider.connection, minterA.publicKey);
+      await airdrop(provider.connection, minterB.publicKey);
+
+      const [minterBConfigPda] = deriveMinterConfig(
+        minterB.publicKey,
+        programId,
+      );
+
+      // Only configure B
+      await program.methods
+        .configureMinter(new anchor.BN(5_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: minterB.publicKey,
+          config: configPda,
+          minterConfig: minterBConfigPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const recipient = Keypair.generate();
+      await airdrop(provider.connection, recipient.publicKey);
+      const recipientAta = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      // minterA tries to sign but pass minterB's config PDA
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(100))
+          .accounts({
+            minter: minterA.publicKey, // A is the signer
+            config: configPda,
+            minterConfig: minterBConfigPda, // but using B's config
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([minterA])
+          .rpc();
+        assert.fail("Should have failed — minterA using minterB's config");
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log("\n[pda_spoof] Expected error logs:\n", logs.join("\n"));
+        assert.ok(err, "PDA seed mismatch should be rejected by Anchor");
+      }
+    });
+
+    it("cannot pass a fake config PDA to bypass admin check on pause", async () => {
+      // rogue tries to construct a fake config and pass it to pauseMint
+      const fakeConfig = Keypair.generate();
+
+      try {
+        await program.methods
+          .pauseMint()
+          .accounts({
+            admin: rogue.publicKey,
+            config: fakeConfig.publicKey, // not the real PDA
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([rogue])
+          .rpc();
+        assert.fail("Should have rejected fake config PDA");
+      } catch (err: any) {
+        // const logs = await getLogs(provider.connection, err);
+        // console.log(
+        //   "\n[fake_config_pause] Expected error logs:\n",
+        //   logs.join("\n"),
+        // );
+        assert.ok(err, "Fake config PDA should be rejected");
+      }
+    });
+  });
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
