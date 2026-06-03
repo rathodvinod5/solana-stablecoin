@@ -848,7 +848,7 @@ describe("solana-stablecoin [edge cases]", () => {
   // ══════════════════════════════════════════════════════════════════════════
   // 5. PDA SPOOFING / ACCOUNT SUBSTITUTION ATTACKS
   // ══════════════════════════════════════════════════════════════════════════
-  describe("PDA spoofing and account substitution", () => {
+  describe("PDA SPOOFING and ACCOUNT SUBSTITUTION", () => {
     it("cannot use a different minter's minter_config to mint (wrong PDA seeds)", async () => {
       // minter A tries to use minter B's config PDA to mint
       const minterA = Keypair.generate();
@@ -942,14 +942,6 @@ async function airdrop(
   address: PublicKey,
   amount = 10 * LAMPORTS_PER_SOL,
 ) {
-  // const sig = await connection.requestAirdrop(address, amount);
-  // const { blockhash, lastValidBlockHeight } =
-  //   await connection.getLatestBlockhash();
-  // await connection.confirmTransaction(
-  //   { signature: sig, blockhash, lastValidBlockHeight },
-  //   "finalized",
-  // );
-
   await connection.confirmTransaction(
     await connection.requestAirdrop(address, amount),
     "confirmed",
