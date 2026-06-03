@@ -933,6 +933,179 @@ describe("solana-stablecoin [edge cases]", () => {
       }
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // 6. STATE CONSISTENCY AFTER SEQUENCES
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("STATE CONSISTENCY ACROSS SEQUENCES", async () => {
+    it("config state is consistent after pause → mint-attempt → unpause → mint", async () => {
+      const seqMinter = Keypair.generate();
+      await airdrop(provider.connection, seqMinter.publicKey);
+      const [seqMinterPda] = deriveMinterConfig(seqMinter.publicKey, programId);
+
+      await program.methods
+        .configureMinter(new anchor.BN(10_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: seqMinter.publicKey,
+          config: configPda,
+          minterConfig: seqMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Pause
+      await program.methods
+        .pauseMint()
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const recipient1 = Keypair.generate();
+      await airdrop(provider.connection, recipient1.publicKey);
+      const r1Ata = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient1.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      // Mint attempt while paused — should fail
+      try {
+        await program.methods
+          .mintTokens(new anchor.BN(500))
+          .accounts({
+            minter: seqMinter.publicKey,
+            config: configPda,
+            minterConfig: seqMinterPda,
+            mint: mintPda,
+            user: recipient1.publicKey,
+            userAta: r1Ata,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([seqMinter])
+          .rpc();
+      } catch {
+        /* expected */
+      }
+
+      // total_minted should still be 0 since the mint failed
+      const mcMid = await program.account.minterConfig.fetch(seqMinterPda);
+      assert.ok(
+        mcMid.totalMinted.eqn(0),
+        "totalMinted should still be 0 after failed mint",
+      );
+
+      // Unpause
+      await program.methods
+        .unpauseMint()
+        .accounts({
+          admin: admin.publicKey,
+          config: configPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      // Mint should now succeed
+      const recipient2 = Keypair.generate();
+      await airdrop(provider.connection, recipient2.publicKey);
+      const r2Ata = getAssociatedTokenAddressSync(
+        mintPda,
+        recipient2.publicKey,
+        false,
+        TOKEN_2022_PROGRAM_ID,
+      );
+
+      await program.methods
+        .mintTokens(new anchor.BN(500))
+        .accounts({
+          minter: seqMinter.publicKey,
+          config: configPda,
+          minterConfig: seqMinterPda,
+          mint: mintPda,
+          user: recipient2.publicKey,
+          userAta: r2Ata,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([seqMinter])
+        .rpc();
+
+      const mcFinal = await program.account.minterConfig.fetch(seqMinterPda);
+      // console.log(`\n[state_consistency] final totalMinted: ${mcFinal.totalMinted}`);
+      assert.ok(
+        mcFinal.totalMinted.eqn(500),
+        "totalMinted should be 500 after successful mint",
+      );
+    });
+
+    it("total_minted accumulates correctly across multiple mints to different users", async () => {
+      const accMinter = Keypair.generate();
+      await airdrop(provider.connection, accMinter.publicKey);
+      const [accMinterPda] = deriveMinterConfig(accMinter.publicKey, programId);
+
+      await program.methods
+        .configureMinter(new anchor.BN(9_000))
+        .accounts({
+          admin: admin.publicKey,
+          minter: accMinter.publicKey,
+          config: configPda,
+          minterConfig: accMinterPda,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([admin])
+        .rpc();
+
+      const amounts = [1_000, 2_000, 3_000];
+      let expectedTotal = 0;
+
+      for (const amount of amounts) {
+        const recipient = Keypair.generate();
+        await airdrop(provider.connection, recipient.publicKey);
+        const recipientAta = getAssociatedTokenAddressSync(
+          mintPda,
+          recipient.publicKey,
+          false,
+          TOKEN_2022_PROGRAM_ID,
+        );
+
+        await program.methods
+          .mintTokens(new anchor.BN(amount))
+          .accounts({
+            minter: accMinter.publicKey,
+            config: configPda,
+            minterConfig: accMinterPda,
+            mint: mintPda,
+            user: recipient.publicKey,
+            userAta: recipientAta,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([accMinter])
+          .rpc();
+
+        expectedTotal += amount;
+        const mc = await program.account.minterConfig.fetch(accMinterPda);
+        // console.log(
+        //   `\n[accumulate] after minting ${amount}: totalMinted=${mc.totalMinted}`,
+        // );
+        assert.ok(
+          mc.totalMinted.eqn(expectedTotal),
+          `totalMinted should be ${expectedTotal} after minting ${amount}`,
+        );
+      }
+    });
+  });
 });
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
